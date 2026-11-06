@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="manifest" href="manifest.json">
+  <title>Venta con cupo</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; background: #f2f4f7; margin: 0; padding: 16px; }
+    .card { max-width: 420px; margin: 0 auto; background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,.1); }
+    h2 { margin: 0 0 8px; font-size: 20px; }
+    label { display: block; margin: 12px 0 4px; font-size: 14px; color: #444; }
+    input, select, button { width: 100%; padding: 12px; font-size: 16px; border: 1px solid #ccc; border-radius: 8px; }
+    button { background: #1a73e8; color: #fff; border: none; margin-top: 16px; cursor: pointer; }
+    button:disabled { background: #9bbcf0; }
+    button.sec { background: #e8eaed; color: #333; }
+    .info { background: #eef4ff; border-radius: 8px; padding: 12px; margin-top: 16px; }
+    .saldo { font-size: 28px; font-weight: bold; color: #1a73e8; }
+    .msg { margin-top: 16px; padding: 12px; border-radius: 8px; font-size: 15px; }
+    .ok { background: #e6f4ea; color: #0d652d; }
+    .error { background: #fce8e6; color: #a50e0e; }
+    .warn { background: #fff4e5; color: #8a4b00; }
+    .hidden { display: none; }
+    #estado { font-size: 13px; margin-bottom: 8px; }
+    .rech { font-size: 14px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <h2>Venta con cupo</h2>
+  <div id="estado"></div>
+  <button class="sec" id="btnSync" onclick="sincronizar(true)" style="margin-top:0">Sincronizar ahora</button>
+
+  <div id="paso1">
+    <label for="cedula">Número de cédula</label>
+    <input id="cedula" type="tel" inputmode="numeric" placeholder="Número cedula">
+    <button onclick="consultar()">Consultar saldo</button>
+  </div>
+
+  <div id="paso2" class="hidden">
+    <div class="info">
+      <div id="quien"></div>
+      <div>Saldo disponible</div>
+      <div class="saldo" id="saldo">0</div>
+    </div>
+    <label for="vendedor">Vendedor</label>
+    <select id="vendedor"><option value="RUIZ">RUIZ</option><option value="GODOS">GODOS</option></select>
+    <label for="clave">Clave del vendedor</label>
+    <input id="clave" type="password" autocomplete="off">
+    <label for="tipo">Tipo</label>
+    <select id="tipo"><option value="deposito">Depósito</option><option value="vehiculo">Vehículo</option></select>
+    <label for="monto">Monto a comprar</label>
+    <input id="monto" type="number" inputmode="numeric" step="1" min="1">
+    <button onclick="comprar()">Registrar compra</button>
+    <button class="sec" onclick="nuevaConsulta()">Otra cédula</button>
+  </div>
+
+  <div id="msg" class="msg hidden"></div>
+  <div id="rechazadas"></div>
+</div>
+
+<script>
+  var API = 'https://script.google.com/macros/s/AKfycbyTtzgnOTVEbtHKEvXUbLs_H_9fWWoqgHekVBtnVagiy_0vv2M_IMq_81vNixTMO3VWkA/exec';
+  var K_SNAP = 'vc_snapshot', K_COLA = 'vc_cola', K_RECH = 'vc_rechazadas';
+  var cedulaActual = '', sincronizando = false;
+
+  function leer(k, def) { try { return JSON.parse(localStorage.getItem(k)) || def; } catch (e) { return def; } }
+  function guardar(k, v) { localStorage.setItem(k, JSON.stringify(v)); }
+  function $(id) { return document.getElementById(id); }
+
+  function mostrar(t, tipo) { var m = $('msg'); m.textContent = t; m.className = 'msg ' + tipo; }
+  function ocultarMsg() { $('msg').className = 'msg hidden'; }
+
+  function pintarEstado() {
+    var n = leer(K_COLA, []).length;
+    var snap = leer(K_SNAP, null);
+    $('estado').textContent = (navigator.onLine ? '🟢 En línea' : '🔴 Sin conexión') +
+      ' · Pendientes: ' + n +
+      (snap ? ' · Datos: ' + new Date(snap.ts).toLocaleString() : ' · Sin datos locales');
+    var rech = leer(K_RECH, []);
+    $('rechazadas').innerHTML = rech.map(function (r, i) {
+      return '<div class="msg error rech">❌ ' + r.cedula + ' ' + r.monto + ' (' + r.tipo + '): ' + r.mensaje +
+        ' <a href="#" onclick="quitarRech(' + i + ');return false">quitar</a></div>';
+    }).join('');
+  }
+  function quitarRech(i) { var r = leer(K_RECH, []); r.splice(i, 1); guardar(K_RECH, r); pintarEstado(); }
+
+  function sincronizar(manual) {
+    if (sincronizando || !navigator.onLine) { if (manual) mostrar('Sin conexión.', 'warn'); return Promise.resolve(); }
+    sincronizando = true;
+    var cola = leer(K_COLA, []);
+    var req = cola.length
+      ? fetch(API, { method: 'POST', body: JSON.stringify({ items: cola }) })
+      : fetch(API + '?action=snapshot');
+    return req.then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (cola.length) {
+          var rech = leer(K_RECH, []);
+          d.resultados.forEach(function (res) {
+            if (!res.ok) {
+              var it = cola.filter(function (c) { return c.id === res.id; })[0];
+              rech.push({ cedula: it.cedula, monto: it.monto, tipo: it.tipo, mensaje: res.mensaje });
+            }
+          });
+          guardar(K_RECH, rech);
+          guardar(K_COLA, []);
+          guardar(K_SNAP, d.snapshot);
+          if (manual || d.resultados.length) mostrar('Sincronizado: ' + d.resultados.filter(function (x) { return x.ok; }).length + ' de ' + d.resultados.length + ' compras aceptadas.', 'ok');
+        } else {
+          guardar(K_SNAP, d);
+          if (manual) mostrar('Datos actualizados.', 'ok');
+        }
+      })
+      .catch(function () { if (manual) mostrar('No se pudo sincronizar. Se reintentará.', 'warn'); })
+      .then(function () { sincronizando = false; pintarEstado(); refrescarSaldo(); });
+  }
+
+  function refrescarSaldo() {
+    if (!cedulaActual) return;
+    var s = leer(K_SNAP, null);
+    var p = s && s.personas[cedulaActual];
+    if (p) $('saldo').textContent = Math.round(s.grupos[p.g].saldo);
+  }
+
+  function consultar() {
+    var c = $('cedula').value.trim();
+    ocultarMsg();
+    if (!c) return mostrar('Ingrese un número de cédula.', 'error');
+    var s = leer(K_SNAP, null);
+    if (!s) return mostrar('Sin datos locales. Conéctese a internet al menos una vez.', 'error');
+    var p = s.personas[c];
+    if (!p) return mostrar('Cédula no encontrada (datos de ' + new Date(s.ts).toLocaleString() + ').', 'error');
+    cedulaActual = c;
+    $('quien').textContent = p.n + ' (' + p.r + ') - Grupo de ' + s.grupos[p.g].jefe;
+    $('saldo').textContent = Math.round(s.grupos[p.g].saldo);
+    $('paso1').classList.add('hidden');
+    $('paso2').classList.remove('hidden');
+  }
+
+  function comprar() {
+    ocultarMsg();
+    var monto = Number($('monto').value), clave = $('clave').value.trim();
+    var s = leer(K_SNAP, null), p = s.personas[cedulaActual], g = s.grupos[p.g];
+    if (!isFinite(monto) || monto <= 0 || monto % 1 !== 0) return mostrar('Ingrese un monto entero mayor a 0.', 'error');
+    if (!clave) return mostrar('Ingrese la clave del vendedor.', 'error');
+    if (monto > g.saldo) return mostrar('No dispone de tanto cupo. Sobrepasa el cupo disponible (' + Math.round(g.saldo) + ').', 'error');
+
+    var cola = leer(K_COLA, []);
+    cola.push({
+      id: Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+      ts: Date.now(), cedula: cedulaActual, vendedor: $('vendedor').value,
+      clave: clave, tipo: $('tipo').value, monto: monto
+    });
+    guardar(K_COLA, cola);
+    g.saldo -= monto;                 // descuento local inmediato
+    guardar(K_SNAP, s);
+    $('saldo').textContent = Math.round(g.saldo);
+    $('monto').value = ''; $('clave').value = '';
+    pintarEstado();
+    if (navigator.onLine) { mostrar('Compra enviada...', 'warn'); sincronizar(false); }
+    else mostrar('Compra guardada sin conexión. Se enviará al volver el internet.', 'warn');
+  }
+
+  function nuevaConsulta() {
+    cedulaActual = ''; $('cedula').value = ''; $('clave').value = ''; $('monto').value = '';
+    $('paso2').classList.add('hidden'); $('paso1').classList.remove('hidden'); ocultarMsg();
+  }
+
+  window.addEventListener('online', function () { sincronizar(false); });
+  window.addEventListener('offline', pintarEstado);
+  setInterval(function () { if (navigator.onLine) sincronizar(false); }, 60000);
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+
+  // Recordar el vendedor de este celular
+  var vSel = $('vendedor');
+  vSel.value = localStorage.getItem('vc_vendedor') || vSel.value;
+  vSel.addEventListener('change', function () { localStorage.setItem('vc_vendedor', vSel.value); });
+
+  pintarEstado();
+  sincronizar(false);
+</script>
+</body>
+</html>
