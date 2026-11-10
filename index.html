@@ -136,6 +136,10 @@
       autocomplete="off"
     >
 
+    <div id="avisoLogin" class="msg warn hidden">
+      📵 Sin internet. Conéctese para entrar.
+    </div>
+
     <button id="btnEntrar" onclick="entrar()">
       Entrar
     </button>
@@ -307,6 +311,13 @@
       btn.textContent = 'Cambiar vendedor (sin internet)';
 
     }
+
+    // Login: avisar y bloquear "Entrar" mientras no haya internet
+    var aviso = $('avisoLogin');
+    var be = $('btnEntrar');
+
+    if (aviso) aviso.classList.toggle('hidden', navigator.onLine);
+    if (be) be.disabled = !navigator.onLine;
   }
 
 
@@ -422,15 +433,15 @@
     var v = $('loginVendedor').value;
     var c = $('loginClave').value.trim();
 
-    if (!c) {
-      return mostrar('Ingrese la clave.', 'error');
-    }
-
     if (!navigator.onLine) {
       return mostrar(
         'Conéctese a internet para entrar.',
         'warn'
       );
+    }
+
+    if (!c) {
+      return mostrar('Ingrese la clave.', 'error');
     }
 
     $('btnEntrar').disabled = true;
@@ -473,7 +484,7 @@
 
       .then(function() {
 
-        $('btnEntrar').disabled = false;
+        $('btnEntrar').disabled = !navigator.onLine;
 
       });
 
