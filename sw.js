@@ -1,4 +1,4 @@
-var CACHE = 'venta-cupo-v1';
+var CACHE = 'venta-cupo-v2';
 var ARCHIVOS = ['./', 'index.html', 'manifest.json'];
 
 self.addEventListener('install', function (e) {
